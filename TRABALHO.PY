@@ -118,7 +118,7 @@ janela_principal.configure(bg="lightblue")
 
 label_titulo = tk.Label(
     janela_principal,
-    text="ACADEMIA FIT",
+    text="ACADEMIA DEBUGGERS",
     font=("Arial", 22, "bold"),
     bg="lightblue",
     fg="darkblue"
