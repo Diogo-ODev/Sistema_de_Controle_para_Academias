@@ -144,7 +144,6 @@ def formatar_cpf(event):
 
     cpf = ''.join(filter(str.isdigit, cpf))
 
-    # Limita a 11 números
     cpf = cpf[:11]
 
     if len(cpf) > 9:
