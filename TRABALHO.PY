@@ -1,8 +1,16 @@
 """
-SISTEMA DE GESTAO DE ACADEMIA - COM INTERFACE GRAFICA (TKINTER)
+SISTEMA DE GESTAO DE ACADEMIA - COM TELAS E LOGIN (TKINTER)
 
-Cadastro de Personais e Alunos, atribuicao de personal, definicao de treinos,
-agendamento de aulas e cobranca de mensalidade todo dia 10.
+Fluxo do sistema:
+1) Tela de Cadastro da Academia (aparece so na primeira vez que o sistema roda)
+2) Tela de Login (Dono / Funcionario / Aluno)
+3) Depois do login, cada tipo de usuario ve uma tela diferente:
+   - DONO: acesso total (cadastra funcionarios, alunos, treinos, aulas, cobrancas...)
+   - FUNCIONARIO (Personal): ve e cuida apenas dos ALUNOS DELE
+   - ALUNO: ve apenas os PROPRIOS TREINOS, separados por dia da semana
+
+Feito em Python puro com Tkinter e SQLite (bibliotecas padrao, nao precisa
+instalar nada).
 """
 
 import sqlite3
@@ -12,9 +20,14 @@ from tkinter import messagebox
 
 NOME_BANCO = "academia.db"
 
+DIAS_DA_SEMANA = [
+    "Segunda-feira", "Terca-feira", "Quarta-feira",
+    "Quinta-feira", "Sexta-feira", "Sabado", "Domingo"
+]
+
 
 # ==========================================================
-# CONEXAO E CRIACAO DO BANCO DE DADOS
+# BANCO DE DADOS
 # ==========================================================
 
 def conectar():
@@ -28,10 +41,24 @@ def criar_tabelas():
     cursor = conexao.cursor()
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS academia (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            cnpj TEXT,
+            telefone TEXT,
+            email TEXT NOT NULL UNIQUE,
+            endereco TEXT,
+            senha TEXT NOT NULL,
+            data_cadastro TEXT
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS personais (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
             cpf TEXT NOT NULL UNIQUE,
+            senha TEXT,
             data_nascimento TEXT,
             telefone TEXT,
             email TEXT,
@@ -47,6 +74,7 @@ def criar_tabelas():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
             cpf TEXT NOT NULL UNIQUE,
+            senha TEXT,
             data_nascimento TEXT,
             telefone TEXT,
             email TEXT,
@@ -67,6 +95,7 @@ def criar_tabelas():
             personal_id INTEGER NOT NULL,
             tipo_treino TEXT,
             descricao TEXT,
+            dia_semana TEXT,
             data_criacao TEXT,
             FOREIGN KEY (aluno_id) REFERENCES alunos(id),
             FOREIGN KEY (personal_id) REFERENCES personais(id)
@@ -103,47 +132,388 @@ def criar_tabelas():
     conexao.close()
 
 
+def academia_existe():
+    conexao = conectar()
+    cursor = conexao.cursor()
+    cursor.execute("SELECT COUNT(*) FROM academia")
+    total = cursor.fetchone()[0]
+    conexao.close()
+    return total > 0
+
+
 def data_hoje():
     return datetime.now().strftime("%d/%m/%Y")
 
 
 # ==========================================================
-# JANELA PRINCIPAL
+# USUARIO LOGADO (variaveis globais simples)
+# ==========================================================
+
+usuario_logado_tipo = None       # "dono", "funcionario" ou "aluno"
+usuario_logado_id = None         # id do personal ou do aluno (dono nao precisa)
+usuario_logado_nome = None
+
+
+# ==========================================================
+# JANELA PRINCIPAL E TROCA DE TELAS
 # ==========================================================
 
 janela_principal = tk.Tk()
 janela_principal.title("Sistema de Gestao de Academia")
-janela_principal.geometry("420x680")
+janela_principal.geometry("450x650")
 janela_principal.configure(bg="lightblue")
 
-label_titulo = tk.Label(
-    janela_principal,
-    text="ACADEMIA DEBUGGERS",
-    font=("Arial", 22, "bold"),
-    bg="lightblue",
-    fg="darkblue"
-)
-label_titulo.pack(pady=15)
+
+def limpar_tela():
+    for widget in janela_principal.winfo_children():
+        widget.destroy()
 
 
 # ==========================================================
-# CADASTRO DE PERSONAL
+# TELA 1 - CADASTRO DA ACADEMIA (so aparece na primeira vez)
+# ==========================================================
+
+def tela_cadastro_academia():
+    limpar_tela()
+
+    tk.Label(janela_principal, text="BEM-VINDO!", font=("Arial", 20, "bold"),
+             bg="lightblue", fg="darkblue").pack(pady=10)
+    tk.Label(janela_principal, text="Vamos cadastrar sua academia", font=("Arial", 12),
+             bg="lightblue").pack(pady=(0, 15))
+
+    tk.Label(janela_principal, text="Nome da academia:", bg="lightblue").pack()
+    entry_nome = tk.Entry(janela_principal, width=35)
+    entry_nome.pack()
+
+    tk.Label(janela_principal, text="CNPJ:", bg="lightblue").pack()
+    entry_cnpj = tk.Entry(janela_principal, width=35)
+    entry_cnpj.pack()
+
+    tk.Label(janela_principal, text="Telefone:", bg="lightblue").pack()
+    entry_telefone = tk.Entry(janela_principal, width=35)
+    entry_telefone.pack()
+
+    tk.Label(janela_principal, text="Endereco:", bg="lightblue").pack()
+    entry_endereco = tk.Entry(janela_principal, width=35)
+    entry_endereco.pack()
+
+    tk.Label(janela_principal, text="Email do dono (sera seu login):", bg="lightblue").pack()
+    entry_email = tk.Entry(janela_principal, width=35)
+    entry_email.pack()
+
+    tk.Label(janela_principal, text="Senha do dono:", bg="lightblue").pack()
+    entry_senha = tk.Entry(janela_principal, width=35, show="*")
+    entry_senha.pack()
+
+    def salvar_academia():
+        nome = entry_nome.get()
+        email = entry_email.get()
+        senha = entry_senha.get()
+
+        if nome == "" or email == "" or senha == "":
+            messagebox.showerror("Erro", "Nome, email e senha sao obrigatorios.")
+            return
+
+        conexao = conectar()
+        cursor = conexao.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO academia (nome, cnpj, telefone, email, endereco, senha, data_cadastro)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (nome, entry_cnpj.get(), entry_telefone.get(), email,
+                  entry_endereco.get(), senha, data_hoje()))
+            conexao.commit()
+            messagebox.showinfo("Sucesso", "Academia cadastrada com sucesso!\nAgora faca login como Dono.")
+            tela_login()
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Erro", "Ja existe uma academia cadastrada com esse email.")
+        finally:
+            conexao.close()
+
+    tk.Button(janela_principal, text="Cadastrar Academia", command=salvar_academia,
+              bg="lightgreen", width=20).pack(pady=20)
+
+
+# ==========================================================
+# TELA 2 - LOGIN
+# ==========================================================
+
+def tela_login():
+    limpar_tela()
+    global usuario_logado_tipo, usuario_logado_id, usuario_logado_nome
+    usuario_logado_tipo = None
+    usuario_logado_id = None
+    usuario_logado_nome = None
+
+    tk.Label(janela_principal, text="ACADEMIA FIT", font=("Arial", 22, "bold"),
+             bg="lightblue", fg="darkblue").pack(pady=20)
+    tk.Label(janela_principal, text="Escolha o tipo de acesso:", font=("Arial", 12),
+             bg="lightblue").pack(pady=10)
+
+    tk.Button(janela_principal, text="Sou o Dono da Academia", width=30, bg="white",
+              command=lambda: tela_formulario_login("dono")).pack(pady=8)
+    tk.Button(janela_principal, text="Sou Funcionario (Personal)", width=30, bg="white",
+              command=lambda: tela_formulario_login("funcionario")).pack(pady=8)
+    tk.Button(janela_principal, text="Sou Aluno", width=30, bg="white",
+              command=lambda: tela_formulario_login("aluno")).pack(pady=8)
+
+
+def tela_formulario_login(tipo):
+    limpar_tela()
+
+    titulos = {
+        "dono": "LOGIN - DONO DA ACADEMIA",
+        "funcionario": "LOGIN - FUNCIONARIO",
+        "aluno": "LOGIN - ALUNO"
+    }
+
+    tk.Label(janela_principal, text=titulos[tipo], font=("Arial", 16, "bold"),
+             bg="lightblue", fg="darkblue").pack(pady=20)
+
+    if tipo == "dono":
+        tk.Label(janela_principal, text="Email:", bg="lightblue").pack()
+    else:
+        tk.Label(janela_principal, text="CPF:", bg="lightblue").pack()
+
+    entry_login = tk.Entry(janela_principal, width=30)
+    entry_login.pack(pady=5)
+
+    tk.Label(janela_principal, text="Senha:", bg="lightblue").pack()
+    entry_senha = tk.Entry(janela_principal, width=30, show="*")
+    entry_senha.pack(pady=5)
+
+    def entrar():
+        valor_login = entry_login.get()
+        senha = entry_senha.get()
+
+        conexao = conectar()
+        cursor = conexao.cursor()
+
+        if tipo == "dono":
+            cursor.execute("SELECT id, nome, senha FROM academia WHERE email = ?", (valor_login,))
+        elif tipo == "funcionario":
+            cursor.execute("SELECT id, nome, senha FROM personais WHERE cpf = ?", (valor_login,))
+        else:
+            cursor.execute("SELECT id, nome, senha FROM alunos WHERE cpf = ?", (valor_login,))
+
+        resultado = cursor.fetchone()
+        conexao.close()
+
+        if not resultado:
+            messagebox.showerror("Erro", "Usuario nao encontrado.")
+            return
+
+        id_encontrado, nome_encontrado, senha_encontrada = resultado
+
+        if senha != senha_encontrada:
+            messagebox.showerror("Erro", "Senha incorreta.")
+            return
+
+        global usuario_logado_tipo, usuario_logado_id, usuario_logado_nome
+        usuario_logado_tipo = tipo
+        usuario_logado_id = id_encontrado
+        usuario_logado_nome = nome_encontrado
+
+        if tipo == "dono":
+            tela_dono()
+        elif tipo == "funcionario":
+            tela_funcionario()
+        else:
+            tela_aluno()
+
+    tk.Button(janela_principal, text="Entrar", command=entrar, bg="lightgreen", width=15).pack(pady=15)
+    tk.Button(janela_principal, text="Voltar", command=tela_login, bg="salmon", width=15).pack()
+
+
+# ==========================================================
+# TELA DO DONO (acesso total)
+# ==========================================================
+
+def tela_dono():
+    limpar_tela()
+
+    tk.Label(janela_principal, text=f"Bem-vindo, {usuario_logado_nome}", font=("Arial", 14, "bold"),
+             bg="lightblue", fg="darkblue").pack(pady=5)
+    tk.Label(janela_principal, text="(Acesso: DONO DA ACADEMIA)", bg="lightblue").pack(pady=(0, 15))
+
+    tk.Button(janela_principal, text="Cadastrar Funcionario", width=32, command=abrir_cadastro_personal).pack(pady=3)
+    tk.Button(janela_principal, text="Listar Funcionarios", width=32, command=abrir_lista_personais).pack(pady=3)
+    tk.Button(janela_principal, text="Cadastrar Aluno", width=32, command=abrir_cadastro_aluno).pack(pady=3)
+    tk.Button(janela_principal, text="Listar Alunos", width=32, command=abrir_lista_alunos).pack(pady=3)
+    tk.Button(janela_principal, text="Atribuir Aluno a um Funcionario", width=32,
+              command=abrir_atribuir_personal).pack(pady=3)
+    tk.Button(janela_principal, text="Definir Treino do Aluno", width=32,
+              command=lambda: abrir_definir_treino(None)).pack(pady=3)
+    tk.Button(janela_principal, text="Ver Treinos de um Aluno", width=32,
+              command=lambda: abrir_ver_treinos(None)).pack(pady=3)
+    tk.Button(janela_principal, text="Agendar Aula", width=32,
+              command=lambda: abrir_agendar_aula(None)).pack(pady=3)
+    tk.Button(janela_principal, text="Ver Agendamentos", width=32,
+              command=lambda: abrir_ver_agendamentos(None)).pack(pady=3)
+    tk.Button(janela_principal, text="Gerar Cobrancas do Mes", width=32,
+              command=gerar_cobrancas_do_mes).pack(pady=3)
+    tk.Button(janela_principal, text="Ver Pagamentos", width=32, command=abrir_ver_pagamentos).pack(pady=3)
+    tk.Button(janela_principal, text="Marcar Pagamento como Pago", width=32,
+              command=abrir_marcar_pagamento).pack(pady=3)
+
+    tk.Button(janela_principal, text="Sair (Logout)", width=32, bg="salmon", command=tela_login).pack(pady=15)
+
+
+# ==========================================================
+# TELA DO FUNCIONARIO (personal) - so ve os alunos DELE
+# ==========================================================
+
+def tela_funcionario():
+    limpar_tela()
+
+    tk.Label(janela_principal, text=f"Bem-vindo, {usuario_logado_nome}", font=("Arial", 14, "bold"),
+             bg="lightblue", fg="darkblue").pack(pady=5)
+    tk.Label(janela_principal, text="(Acesso: FUNCIONARIO / PERSONAL)", bg="lightblue").pack(pady=(0, 15))
+
+    tk.Button(janela_principal, text="Ver Meus Alunos", width=32, command=abrir_meus_alunos).pack(pady=5)
+    tk.Button(janela_principal, text="Definir Treino de um Aluno Meu", width=32,
+              command=lambda: abrir_definir_treino(usuario_logado_id)).pack(pady=5)
+    tk.Button(janela_principal, text="Ver Treinos de um Aluno Meu", width=32,
+              command=lambda: abrir_ver_treinos(usuario_logado_id)).pack(pady=5)
+    tk.Button(janela_principal, text="Agendar Aula com um Aluno Meu", width=32,
+              command=lambda: abrir_agendar_aula(usuario_logado_id)).pack(pady=5)
+    tk.Button(janela_principal, text="Ver Meus Agendamentos", width=32,
+              command=lambda: abrir_ver_agendamentos(usuario_logado_id)).pack(pady=5)
+
+    tk.Button(janela_principal, text="Sair (Logout)", width=32, bg="salmon", command=tela_login).pack(pady=20)
+
+
+def abrir_meus_alunos():
+    janela = tk.Toplevel(janela_principal)
+    janela.title("Meus Alunos")
+    janela.geometry("450x400")
+
+    tk.Label(janela, text="MEUS ALUNOS", font=("Arial", 12, "bold")).pack(pady=10)
+
+    caixa_texto = tk.Text(janela, width=55, height=18)
+    caixa_texto.pack(padx=10, pady=10)
+
+    conexao = conectar()
+    cursor = conexao.cursor()
+    cursor.execute("""
+        SELECT id, nome, cpf, plano FROM alunos WHERE personal_id = ?
+    """, (usuario_logado_id,))
+    resultado = cursor.fetchall()
+    conexao.close()
+
+    if len(resultado) == 0:
+        caixa_texto.insert(tk.END, "Voce ainda nao tem alunos atribuidos.")
+    else:
+        for a in resultado:
+            caixa_texto.insert(tk.END, f"ID: {a[0]} | Nome: {a[1]}\nCPF: {a[2]} | Plano: {a[3]}\n\n")
+
+
+# ==========================================================
+# TELA DO ALUNO - so ve os PROPRIOS treinos, por dia da semana
+# ==========================================================
+
+def tela_aluno():
+    limpar_tela()
+
+    tk.Label(janela_principal, text=f"Bem-vindo, {usuario_logado_nome}", font=("Arial", 14, "bold"),
+             bg="lightblue", fg="darkblue").pack(pady=5)
+    tk.Label(janela_principal, text="(Acesso: ALUNO)", bg="lightblue").pack(pady=(0, 15))
+
+    tk.Button(janela_principal, text="Meus Treinos por Dia", width=32,
+              command=abrir_meus_treinos_por_dia).pack(pady=5)
+    tk.Button(janela_principal, text="Meus Proximos Agendamentos", width=32,
+              command=abrir_meus_agendamentos).pack(pady=5)
+
+    tk.Button(janela_principal, text="Sair (Logout)", width=32, bg="salmon", command=tela_login).pack(pady=20)
+
+
+def abrir_meus_treinos_por_dia():
+    janela = tk.Toplevel(janela_principal)
+    janela.title("Meus Treinos por Dia")
+    janela.geometry("480x500")
+
+    tk.Label(janela, text="MEUS TREINOS - POR DIA DA SEMANA", font=("Arial", 12, "bold")).pack(pady=10)
+
+    caixa_texto = tk.Text(janela, width=58, height=22)
+    caixa_texto.pack(padx=10, pady=10)
+
+    conexao = conectar()
+    cursor = conexao.cursor()
+    cursor.execute("""
+        SELECT tipo_treino, descricao, dia_semana FROM treinos WHERE aluno_id = ?
+    """, (usuario_logado_id,))
+    treinos = cursor.fetchall()
+    conexao.close()
+
+    if len(treinos) == 0:
+        caixa_texto.insert(tk.END, "Voce ainda nao tem treinos cadastrados.")
+        return
+
+    for dia in DIAS_DA_SEMANA:
+        treinos_do_dia = [t for t in treinos if t[2] == dia]
+        if treinos_do_dia:
+            caixa_texto.insert(tk.END, f"=== {dia.upper()} ===\n")
+            for t in treinos_do_dia:
+                caixa_texto.insert(tk.END, f"- Tipo: {t[0]}\n  Descricao: {t[1]}\n\n")
+
+    treinos_sem_dia = [t for t in treinos if not t[2]]
+    if treinos_sem_dia:
+        caixa_texto.insert(tk.END, "=== SEM DIA DEFINIDO ===\n")
+        for t in treinos_sem_dia:
+            caixa_texto.insert(tk.END, f"- Tipo: {t[0]}\n  Descricao: {t[1]}\n\n")
+
+
+def abrir_meus_agendamentos():
+    janela = tk.Toplevel(janela_principal)
+    janela.title("Meus Agendamentos")
+    janela.geometry("450x400")
+
+    tk.Label(janela, text="MEUS PROXIMOS AGENDAMENTOS", font=("Arial", 12, "bold")).pack(pady=10)
+
+    caixa_texto = tk.Text(janela, width=55, height=18)
+    caixa_texto.pack(padx=10, pady=10)
+
+    conexao = conectar()
+    cursor = conexao.cursor()
+    cursor.execute("""
+        SELECT agendamentos.data_aula, agendamentos.horario, personais.nome, agendamentos.status
+        FROM agendamentos
+        JOIN personais ON agendamentos.personal_id = personais.id
+        WHERE agendamentos.aluno_id = ?
+        ORDER BY agendamentos.data_aula, agendamentos.horario
+    """, (usuario_logado_id,))
+    resultado = cursor.fetchall()
+    conexao.close()
+
+    if len(resultado) == 0:
+        caixa_texto.insert(tk.END, "Voce nao tem nenhuma aula agendada.")
+    else:
+        for ag in resultado:
+            caixa_texto.insert(tk.END, f"Data: {ag[0]} | Horario: {ag[1]}\nPersonal: {ag[2]} | Status: {ag[3]}\n\n")
+
+
+# ==========================================================
+# CADASTRO DE FUNCIONARIO (PERSONAL) - so o Dono acessa
 # ==========================================================
 
 def abrir_cadastro_personal():
     janela = tk.Toplevel(janela_principal)
-    janela.title("Cadastrar Personal")
-    janela.geometry("350x520")
+    janela.title("Cadastrar Funcionario")
+    janela.geometry("350x580")
 
-    tk.Label(janela, text="CADASTRO DE PERSONAL TRAINER", font=("Arial", 12, "bold")).pack(pady=10)
+    tk.Label(janela, text="CADASTRO DE FUNCIONARIO (PERSONAL)", font=("Arial", 12, "bold")).pack(pady=10)
 
     tk.Label(janela, text="Nome completo:").pack()
     entry_nome = tk.Entry(janela, width=35)
     entry_nome.pack()
 
-    tk.Label(janela, text="CPF:").pack()
+    tk.Label(janela, text="CPF (sera o login dele):").pack()
     entry_cpf = tk.Entry(janela, width=35)
     entry_cpf.pack()
+
+    tk.Label(janela, text="Senha de acesso:").pack()
+    entry_senha = tk.Entry(janela, width=35, show="*")
+    entry_senha.pack()
 
     tk.Label(janela, text="Data de nascimento (dd/mm/aaaa):").pack()
     entry_nasc = tk.Entry(janela, width=35)
@@ -172,9 +542,10 @@ def abrir_cadastro_personal():
     def salvar_personal():
         nome = entry_nome.get()
         cpf = entry_cpf.get()
+        senha = entry_senha.get()
 
-        if nome == "" or cpf == "":
-            messagebox.showerror("Erro", "Nome e CPF sao obrigatorios.")
+        if nome == "" or cpf == "" or senha == "":
+            messagebox.showerror("Erro", "Nome, CPF e senha sao obrigatorios.")
             return
 
         conexao = conectar()
@@ -182,15 +553,15 @@ def abrir_cadastro_personal():
         try:
             cursor.execute("""
                 INSERT INTO personais
-                (nome, cpf, data_nascimento, telefone, email, endereco, cref, especialidade, data_cadastro)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (nome, cpf, entry_nasc.get(), entry_tel.get(), entry_email.get(),
+                (nome, cpf, senha, data_nascimento, telefone, email, endereco, cref, especialidade, data_cadastro)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (nome, cpf, senha, entry_nasc.get(), entry_tel.get(), entry_email.get(),
                   entry_end.get(), entry_cref.get(), entry_esp.get(), data_hoje()))
             conexao.commit()
-            messagebox.showinfo("Sucesso", "Personal cadastrado com sucesso! ID: " + str(cursor.lastrowid))
+            messagebox.showinfo("Sucesso", "Funcionario cadastrado com sucesso! ID: " + str(cursor.lastrowid))
             janela.destroy()
         except sqlite3.IntegrityError:
-            messagebox.showerror("Erro", "Ja existe um personal cadastrado com esse CPF.")
+            messagebox.showerror("Erro", "Ja existe um funcionario cadastrado com esse CPF.")
         finally:
             conexao.close()
 
@@ -199,10 +570,10 @@ def abrir_cadastro_personal():
 
 def abrir_lista_personais():
     janela = tk.Toplevel(janela_principal)
-    janela.title("Lista de Personais")
+    janela.title("Lista de Funcionarios")
     janela.geometry("450x400")
 
-    tk.Label(janela, text="LISTA DE PERSONAIS", font=("Arial", 12, "bold")).pack(pady=10)
+    tk.Label(janela, text="LISTA DE FUNCIONARIOS", font=("Arial", 12, "bold")).pack(pady=10)
 
     caixa_texto = tk.Text(janela, width=55, height=18)
     caixa_texto.pack(padx=10, pady=10)
@@ -214,7 +585,7 @@ def abrir_lista_personais():
     conexao.close()
 
     if len(resultado) == 0:
-        caixa_texto.insert(tk.END, "Nenhum personal cadastrado.")
+        caixa_texto.insert(tk.END, "Nenhum funcionario cadastrado.")
     else:
         for p in resultado:
             caixa_texto.insert(
@@ -224,13 +595,13 @@ def abrir_lista_personais():
 
 
 # ==========================================================
-# CADASTRO DE ALUNO
+# CADASTRO DE ALUNO - so o Dono acessa
 # ==========================================================
 
 def abrir_cadastro_aluno():
     janela = tk.Toplevel(janela_principal)
     janela.title("Cadastrar Aluno")
-    janela.geometry("350x600")
+    janela.geometry("350x660")
 
     tk.Label(janela, text="CADASTRO DE ALUNO", font=("Arial", 12, "bold")).pack(pady=10)
 
@@ -238,9 +609,13 @@ def abrir_cadastro_aluno():
     entry_nome = tk.Entry(janela, width=35)
     entry_nome.pack()
 
-    tk.Label(janela, text="CPF:").pack()
+    tk.Label(janela, text="CPF (sera o login dele):").pack()
     entry_cpf = tk.Entry(janela, width=35)
     entry_cpf.pack()
+
+    tk.Label(janela, text="Senha de acesso:").pack()
+    entry_senha = tk.Entry(janela, width=35, show="*")
+    entry_senha.pack()
 
     tk.Label(janela, text="Data de nascimento (dd/mm/aaaa):").pack()
     entry_nasc = tk.Entry(janela, width=35)
@@ -273,9 +648,10 @@ def abrir_cadastro_aluno():
     def salvar_aluno():
         nome = entry_nome.get()
         cpf = entry_cpf.get()
+        senha = entry_senha.get()
 
-        if nome == "" or cpf == "":
-            messagebox.showerror("Erro", "Nome e CPF sao obrigatorios.")
+        if nome == "" or cpf == "" or senha == "":
+            messagebox.showerror("Erro", "Nome, CPF e senha sao obrigatorios.")
             return
 
         try:
@@ -289,10 +665,10 @@ def abrir_cadastro_aluno():
         try:
             cursor.execute("""
                 INSERT INTO alunos
-                (nome, cpf, data_nascimento, telefone, email, endereco, objetivo, plano,
+                (nome, cpf, senha, data_nascimento, telefone, email, endereco, objetivo, plano,
                  valor_mensalidade, personal_id, data_cadastro)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-            """, (nome, cpf, entry_nasc.get(), entry_tel.get(), entry_email.get(),
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            """, (nome, cpf, senha, entry_nasc.get(), entry_tel.get(), entry_email.get(),
                   entry_end.get(), entry_obj.get(), entry_plano.get(), valor_mensalidade, data_hoje()))
             conexao.commit()
             messagebox.showinfo("Sucesso", "Aluno cadastrado com sucesso! ID: " + str(cursor.lastrowid))
@@ -337,15 +713,15 @@ def abrir_lista_alunos():
 
 
 # ==========================================================
-# ATRIBUIR ALUNO A UM PERSONAL
+# ATRIBUIR ALUNO A UM FUNCIONARIO - so o Dono acessa
 # ==========================================================
 
 def abrir_atribuir_personal():
     janela = tk.Toplevel(janela_principal)
-    janela.title("Atribuir Aluno a um Personal")
+    janela.title("Atribuir Aluno a um Funcionario")
     janela.geometry("400x550")
 
-    tk.Label(janela, text="ATRIBUIR ALUNO A UM PERSONAL", font=("Arial", 12, "bold")).pack(pady=10)
+    tk.Label(janela, text="ATRIBUIR ALUNO A UM FUNCIONARIO", font=("Arial", 12, "bold")).pack(pady=10)
 
     tk.Label(janela, text="Alunos cadastrados:").pack()
     caixa_alunos = tk.Text(janela, width=45, height=8)
@@ -362,7 +738,7 @@ def abrir_atribuir_personal():
     entry_aluno_id = tk.Entry(janela, width=10)
     entry_aluno_id.pack()
 
-    tk.Label(janela, text="Personais cadastrados:").pack(pady=(10, 0))
+    tk.Label(janela, text="Funcionarios cadastrados:").pack(pady=(10, 0))
     caixa_personais = tk.Text(janela, width=45, height=8)
     caixa_personais.pack(pady=5)
 
@@ -373,7 +749,7 @@ def abrir_atribuir_personal():
         caixa_personais.insert(tk.END, f"{p[0]} - {p[1]}\n")
     conexao.close()
 
-    tk.Label(janela, text="Digite o ID do personal:").pack()
+    tk.Label(janela, text="Digite o ID do funcionario:").pack()
     entry_personal_id = tk.Entry(janela, width=10)
     entry_personal_id.pack()
 
@@ -391,11 +767,11 @@ def abrir_atribuir_personal():
         if not aluno:
             messagebox.showerror("Erro", "Aluno nao encontrado.")
         elif not personal:
-            messagebox.showerror("Erro", "Personal nao encontrado.")
+            messagebox.showerror("Erro", "Funcionario nao encontrado.")
         else:
             cursor.execute("UPDATE alunos SET personal_id = ? WHERE id = ?", (personal_id, aluno_id))
             conexao.commit()
-            messagebox.showinfo("Sucesso", "Aluno atribuido ao personal com sucesso!")
+            messagebox.showinfo("Sucesso", "Aluno atribuido ao funcionario com sucesso!")
             janela.destroy()
 
         conexao.close()
@@ -404,23 +780,32 @@ def abrir_atribuir_personal():
 
 
 # ==========================================================
-# DEFINIR TREINO DO ALUNO
+# DEFINIR TREINO DO ALUNO (com dia da semana)
+# Se personal_id_fixo for informado (funcionario logado), so pode
+# escolher entre os alunos DELE. Se for None (dono), pode escolher qualquer aluno.
 # ==========================================================
 
-def abrir_definir_treino():
+def abrir_definir_treino(personal_id_fixo):
     janela = tk.Toplevel(janela_principal)
     janela.title("Definir Treino do Aluno")
-    janela.geometry("400x550")
+    janela.geometry("400x600")
 
     tk.Label(janela, text="DEFINIR TREINO DO ALUNO", font=("Arial", 12, "bold")).pack(pady=10)
 
-    tk.Label(janela, text="Alunos cadastrados:").pack()
+    if personal_id_fixo:
+        tk.Label(janela, text="Meus alunos:").pack()
+    else:
+        tk.Label(janela, text="Alunos cadastrados:").pack()
+
     caixa_alunos = tk.Text(janela, width=45, height=8)
     caixa_alunos.pack(pady=5)
 
     conexao = conectar()
     cursor = conexao.cursor()
-    cursor.execute("SELECT id, nome FROM alunos")
+    if personal_id_fixo:
+        cursor.execute("SELECT id, nome FROM alunos WHERE personal_id = ?", (personal_id_fixo,))
+    else:
+        cursor.execute("SELECT id, nome FROM alunos")
     for a in cursor.fetchall():
         caixa_alunos.insert(tk.END, f"{a[0]} - {a[1]}\n")
     conexao.close()
@@ -433,7 +818,12 @@ def abrir_definir_treino():
     entry_tipo = tk.Entry(janela, width=35)
     entry_tipo.pack()
 
-    tk.Label(janela, text="Descricao do treino:").pack()
+    tk.Label(janela, text="Dia da semana desse treino:").pack(pady=(10, 0))
+    dia_selecionado = tk.StringVar(janela)
+    dia_selecionado.set(DIAS_DA_SEMANA[0])
+    tk.OptionMenu(janela, dia_selecionado, *DIAS_DA_SEMANA).pack()
+
+    tk.Label(janela, text="Descricao do treino:").pack(pady=(10, 0))
     texto_descricao = tk.Text(janela, width=40, height=6)
     texto_descricao.pack()
 
@@ -451,18 +841,25 @@ def abrir_definir_treino():
             return
 
         if not aluno[1]:
-            messagebox.showerror("Erro", "Esse aluno ainda nao tem um personal atribuido. Atribua um personal primeiro.")
+            messagebox.showerror("Erro", "Esse aluno ainda nao tem um funcionario atribuido.")
+            conexao.close()
+            return
+
+        # se for funcionario logado, so pode mexer nos proprios alunos
+        if personal_id_fixo and aluno[1] != personal_id_fixo:
+            messagebox.showerror("Erro", "Esse aluno nao e seu. Voce so pode definir treinos dos seus alunos.")
             conexao.close()
             return
 
         personal_id = aluno[1]
         tipo_treino = entry_tipo.get()
+        dia_semana = dia_selecionado.get()
         descricao = texto_descricao.get("1.0", tk.END).strip()
 
         cursor.execute("""
-            INSERT INTO treinos (aluno_id, personal_id, tipo_treino, descricao, data_criacao)
-            VALUES (?, ?, ?, ?, ?)
-        """, (aluno_id, personal_id, tipo_treino, descricao, data_hoje()))
+            INSERT INTO treinos (aluno_id, personal_id, tipo_treino, descricao, dia_semana, data_criacao)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (aluno_id, personal_id, tipo_treino, descricao, dia_semana, data_hoje()))
         conexao.commit()
         conexao.close()
 
@@ -472,20 +869,27 @@ def abrir_definir_treino():
     tk.Button(janela, text="Salvar Treino", command=salvar_treino, bg="lightgreen", width=15).pack(pady=15)
 
 
-def abrir_ver_treinos():
+def abrir_ver_treinos(personal_id_fixo):
     janela = tk.Toplevel(janela_principal)
     janela.title("Treinos de um Aluno")
-    janela.geometry("450x500")
+    janela.geometry("450x520")
 
     tk.Label(janela, text="TREINOS DE UM ALUNO", font=("Arial", 12, "bold")).pack(pady=10)
 
-    tk.Label(janela, text="Alunos cadastrados:").pack()
+    if personal_id_fixo:
+        tk.Label(janela, text="Meus alunos:").pack()
+    else:
+        tk.Label(janela, text="Alunos cadastrados:").pack()
+
     caixa_alunos = tk.Text(janela, width=50, height=6)
     caixa_alunos.pack(pady=5)
 
     conexao = conectar()
     cursor = conexao.cursor()
-    cursor.execute("SELECT id, nome FROM alunos")
+    if personal_id_fixo:
+        cursor.execute("SELECT id, nome FROM alunos WHERE personal_id = ?", (personal_id_fixo,))
+    else:
+        cursor.execute("SELECT id, nome FROM alunos")
     for a in cursor.fetchall():
         caixa_alunos.insert(tk.END, f"{a[0]} - {a[1]}\n")
     conexao.close()
@@ -503,8 +907,17 @@ def abrir_ver_treinos():
 
         conexao = conectar()
         cursor = conexao.cursor()
+
+        if personal_id_fixo:
+            cursor.execute("SELECT personal_id FROM alunos WHERE id = ?", (aluno_id,))
+            dono_do_aluno = cursor.fetchone()
+            if not dono_do_aluno or dono_do_aluno[0] != personal_id_fixo:
+                caixa_resultado.insert(tk.END, "Esse aluno nao e seu.")
+                conexao.close()
+                return
+
         cursor.execute("""
-            SELECT treinos.tipo_treino, treinos.descricao, treinos.data_criacao, personais.nome
+            SELECT treinos.tipo_treino, treinos.descricao, treinos.dia_semana, personais.nome
             FROM treinos
             JOIN personais ON treinos.personal_id = personais.id
             WHERE treinos.aluno_id = ?
@@ -516,9 +929,10 @@ def abrir_ver_treinos():
             caixa_resultado.insert(tk.END, "Esse aluno ainda nao tem treinos cadastrados.")
         else:
             for t in resultado:
+                dia = t[2] if t[2] else "Sem dia definido"
                 caixa_resultado.insert(
                     tk.END,
-                    f"Tipo: {t[0]}\nDescricao: {t[1]}\nData: {t[2]}\nPersonal: {t[3]}\n\n"
+                    f"Dia: {dia}\nTipo: {t[0]}\nDescricao: {t[1]}\nFuncionario: {t[3]}\n\n"
                 )
 
     tk.Button(janela, text="Buscar Treinos", command=buscar_treinos, bg="lightyellow", width=15).pack()
@@ -528,20 +942,27 @@ def abrir_ver_treinos():
 # AGENDAMENTO DE AULAS
 # ==========================================================
 
-def abrir_agendar_aula():
+def abrir_agendar_aula(personal_id_fixo):
     janela = tk.Toplevel(janela_principal)
     janela.title("Agendar Aula")
-    janela.geometry("400x500")
+    janela.geometry("400x520")
 
     tk.Label(janela, text="AGENDAR AULA", font=("Arial", 12, "bold")).pack(pady=10)
 
-    tk.Label(janela, text="Alunos cadastrados:").pack()
+    if personal_id_fixo:
+        tk.Label(janela, text="Meus alunos:").pack()
+    else:
+        tk.Label(janela, text="Alunos cadastrados:").pack()
+
     caixa_alunos = tk.Text(janela, width=45, height=8)
     caixa_alunos.pack(pady=5)
 
     conexao = conectar()
     cursor = conexao.cursor()
-    cursor.execute("SELECT id, nome FROM alunos")
+    if personal_id_fixo:
+        cursor.execute("SELECT id, nome FROM alunos WHERE personal_id = ?", (personal_id_fixo,))
+    else:
+        cursor.execute("SELECT id, nome FROM alunos")
     for a in cursor.fetchall():
         caixa_alunos.insert(tk.END, f"{a[0]} - {a[1]}\n")
     conexao.close()
@@ -572,7 +993,12 @@ def abrir_agendar_aula():
             return
 
         if not aluno[0]:
-            messagebox.showerror("Erro", "Esse aluno nao tem personal atribuido. Atribua um personal antes de agendar.")
+            messagebox.showerror("Erro", "Esse aluno nao tem funcionario atribuido.")
+            conexao.close()
+            return
+
+        if personal_id_fixo and aluno[0] != personal_id_fixo:
+            messagebox.showerror("Erro", "Esse aluno nao e seu.")
             conexao.close()
             return
 
@@ -591,7 +1017,7 @@ def abrir_agendar_aula():
     tk.Button(janela, text="Agendar", command=salvar_agendamento, bg="lightgreen", width=15).pack(pady=15)
 
 
-def abrir_ver_agendamentos():
+def abrir_ver_agendamentos(personal_id_fixo):
     janela = tk.Toplevel(janela_principal)
     janela.title("Lista de Agendamentos")
     janela.geometry("480x420")
@@ -603,14 +1029,25 @@ def abrir_ver_agendamentos():
 
     conexao = conectar()
     cursor = conexao.cursor()
-    cursor.execute("""
-        SELECT agendamentos.id, alunos.nome, personais.nome, agendamentos.data_aula,
-               agendamentos.horario, agendamentos.status
-        FROM agendamentos
-        JOIN alunos ON agendamentos.aluno_id = alunos.id
-        JOIN personais ON agendamentos.personal_id = personais.id
-        ORDER BY agendamentos.data_aula, agendamentos.horario
-    """)
+    if personal_id_fixo:
+        cursor.execute("""
+            SELECT agendamentos.id, alunos.nome, personais.nome, agendamentos.data_aula,
+                   agendamentos.horario, agendamentos.status
+            FROM agendamentos
+            JOIN alunos ON agendamentos.aluno_id = alunos.id
+            JOIN personais ON agendamentos.personal_id = personais.id
+            WHERE agendamentos.personal_id = ?
+            ORDER BY agendamentos.data_aula, agendamentos.horario
+        """, (personal_id_fixo,))
+    else:
+        cursor.execute("""
+            SELECT agendamentos.id, alunos.nome, personais.nome, agendamentos.data_aula,
+                   agendamentos.horario, agendamentos.status
+            FROM agendamentos
+            JOIN alunos ON agendamentos.aluno_id = alunos.id
+            JOIN personais ON agendamentos.personal_id = personais.id
+            ORDER BY agendamentos.data_aula, agendamentos.horario
+        """)
     resultado = cursor.fetchall()
     conexao.close()
 
@@ -620,12 +1057,12 @@ def abrir_ver_agendamentos():
         for ag in resultado:
             caixa_texto.insert(
                 tk.END,
-                f"ID: {ag[0]} | Aluno: {ag[1]}\nPersonal: {ag[2]}\nData: {ag[3]} | Horario: {ag[4]} | Status: {ag[5]}\n\n"
+                f"ID: {ag[0]} | Aluno: {ag[1]}\nFuncionario: {ag[2]}\nData: {ag[3]} | Horario: {ag[4]} | Status: {ag[5]}\n\n"
             )
 
 
 # ==========================================================
-# COBRANCA DE MENSALIDADE (TODO DIA 10)
+# COBRANCA DE MENSALIDADE (TODO DIA 10) - so o Dono acessa
 # ==========================================================
 
 def gerar_cobrancas_do_mes():
@@ -669,7 +1106,7 @@ def gerar_cobrancas_do_mes():
 
 def verificar_cobranca_automatica():
     """
-    Chamada automaticamente ao abrir o sistema.
+    Chamada automaticamente ao abrir o sistema (se a academia ja existir).
     Se hoje for dia 10, gera as cobrancas do mes sem precisar o usuario pedir.
     """
     hoje = datetime.now()
@@ -766,36 +1203,16 @@ def abrir_marcar_pagamento():
 
 
 # ==========================================================
-# BOTOES DO MENU PRINCIPAL
-# ==========================================================
-
-tk.Button(janela_principal, text="1 - Cadastrar Personal", width=30, command=abrir_cadastro_personal).pack(pady=3)
-tk.Button(janela_principal, text="2 - Listar Personais", width=30, command=abrir_lista_personais).pack(pady=3)
-tk.Button(janela_principal, text="3 - Cadastrar Aluno", width=30, command=abrir_cadastro_aluno).pack(pady=3)
-tk.Button(janela_principal, text="4 - Listar Alunos", width=30, command=abrir_lista_alunos).pack(pady=3)
-tk.Button(janela_principal, text="5 - Atribuir Aluno a um Personal", width=30, command=abrir_atribuir_personal).pack(pady=3)
-tk.Button(janela_principal, text="6 - Definir Treino do Aluno", width=30, command=abrir_definir_treino).pack(pady=3)
-tk.Button(janela_principal, text="7 - Ver Treinos de um Aluno", width=30, command=abrir_ver_treinos).pack(pady=3)
-tk.Button(janela_principal, text="8 - Agendar Aula", width=30, command=abrir_agendar_aula).pack(pady=3)
-tk.Button(janela_principal, text="9 - Ver Agendamentos", width=30, command=abrir_ver_agendamentos).pack(pady=3)
-tk.Button(janela_principal, text="10 - Gerar Cobrancas do Mes", width=30, command=gerar_cobrancas_do_mes).pack(pady=3)
-tk.Button(janela_principal, text="11 - Ver Pagamentos", width=30, command=abrir_ver_pagamentos).pack(pady=3)
-tk.Button(janela_principal, text="12 - Marcar Pagamento como Pago", width=30, command=abrir_marcar_pagamento).pack(pady=3)
-
-tk.Button(
-    janela_principal,
-    text="Sair",
-    width=30,
-    bg="salmon",
-    command=janela_principal.destroy
-).pack(pady=15)
-
-
-# ==========================================================
 # INICIO DO PROGRAMA
 # ==========================================================
 
 if __name__ == "__main__":
     criar_tabelas()
-    verificar_cobranca_automatica()
+
+    if academia_existe():
+        verificar_cobranca_automatica()
+        tela_login()
+    else:
+        tela_cadastro_academia()
+
     janela_principal.mainloop()
