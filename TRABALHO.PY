@@ -145,6 +145,59 @@ def data_hoje():
     return datetime.now().strftime("%d/%m/%Y")
 
 
+
+#==========================================================
+    # Validação para números
+#==========================================================
+
+def apenas_numeros(valor):
+     return valor.isdigit() or valor == ""
+
+
+
+#==========================================================
+    # Formatação CPF
+#==========================================================
+def formatar_cpf(event):
+    cpf = event.widget.get()
+
+    cpf = ''.join(filter(str.isdigit, cpf))
+
+    cpf = cpf[:11]
+
+    if len(cpf) > 9:
+        cpf = cpf[:3] + "." + cpf[3:6] + "." + cpf[6:9] + "-" + cpf[9:]
+    elif len(cpf) > 6:
+        cpf = cpf[:3] + "." + cpf[3:6] + "." + cpf[6:]
+    elif len(cpf) > 3:
+        cpf = cpf[:3] + "." + cpf[3:]
+
+    event.widget.delete(0, tk.END)
+    event.widget.insert(0, cpf)
+
+
+
+#==========================================================
+    # Formatação Data de nascimento
+#==========================================================
+
+
+
+def formatar_data(event):
+    data = event.widget.get()
+
+    data = ''.join(filter(str.isdigit, data))
+
+    data = data[:8]
+
+    if len(data) > 4:
+        data = data[:2] + "/" + data[2:4] + "/" + data[4:]
+    elif len(data) > 2:
+        data = data[:2] + "/" + data[2:]
+
+    event.widget.delete(0, tk.END)
+    event.widget.insert(0, data)
+
 # ==========================================================
 # USUARIO LOGADO (variaveis globais simples)
 # ==========================================================
@@ -180,7 +233,9 @@ def tela_cadastro_academia():
              bg="lightblue", fg="darkblue").pack(pady=10)
     tk.Label(janela_principal, text="Vamos cadastrar sua academia", font=("Arial", 12),
              bg="lightblue").pack(pady=(0, 15))
+    
 
+    validacao = janela_principal.register(apenas_numeros)
     tk.Label(janela_principal, text="Nome da academia:", bg="lightblue").pack()
     entry_nome = tk.Entry(janela_principal, width=35)
     entry_nome.pack()
@@ -190,7 +245,8 @@ def tela_cadastro_academia():
     entry_cnpj.pack()
 
     tk.Label(janela_principal, text="Telefone:", bg="lightblue").pack()
-    entry_telefone = tk.Entry(janela_principal, width=35)
+    entry_telefone = tk.Entry(janela_principal, width=35,validate="key",
+    validatecommand=(validacao, "%P"))
     entry_telefone.pack()
 
     tk.Label(janela_principal, text="Endereco:", bg="lightblue").pack()
@@ -274,9 +330,12 @@ def tela_formulario_login(tipo):
         tk.Label(janela_principal, text="Email:", bg="lightblue").pack()
     else:
         tk.Label(janela_principal, text="CPF:", bg="lightblue").pack()
-
+    
     entry_login = tk.Entry(janela_principal, width=30)
     entry_login.pack(pady=5)
+
+    if tipo != "dono":
+        entry_login.bind("<KeyRelease>", formatar_cpf)
 
     tk.Label(janela_principal, text="Senha:", bg="lightblue").pack()
     entry_senha = tk.Entry(janela_principal, width=30, show="*")
@@ -392,6 +451,7 @@ def abrir_meus_alunos():
 
     caixa_texto = tk.Text(janela, width=55, height=18)
     caixa_texto.pack(padx=10, pady=10)
+    caixa_texto.config(state="normal")
 
     conexao = conectar()
     cursor = conexao.cursor()
@@ -406,6 +466,7 @@ def abrir_meus_alunos():
     else:
         for a in resultado:
             caixa_texto.insert(tk.END, f"ID: {a[0]} | Nome: {a[1]}\nCPF: {a[2]} | Plano: {a[3]}\n\n")
+    caixa_texto.config(state="disabled")
 
 
 # ==========================================================
@@ -436,6 +497,7 @@ def abrir_meus_treinos_por_dia():
 
     caixa_texto = tk.Text(janela, width=58, height=22)
     caixa_texto.pack(padx=10, pady=10)
+    caixa_texto.config(state="normal")
 
     conexao = conectar()
     cursor = conexao.cursor()
@@ -461,6 +523,7 @@ def abrir_meus_treinos_por_dia():
         caixa_texto.insert(tk.END, "=== SEM DIA DEFINIDO ===\n")
         for t in treinos_sem_dia:
             caixa_texto.insert(tk.END, f"- Tipo: {t[0]}\n  Descricao: {t[1]}\n\n")
+    caixa_texto.config(state="disabled")
 
 
 def abrir_meus_agendamentos():
@@ -472,6 +535,7 @@ def abrir_meus_agendamentos():
 
     caixa_texto = tk.Text(janela, width=55, height=18)
     caixa_texto.pack(padx=10, pady=10)
+    caixa_texto.config(state="normal")
 
     conexao = conectar()
     cursor = conexao.cursor()
@@ -490,7 +554,7 @@ def abrir_meus_agendamentos():
     else:
         for ag in resultado:
             caixa_texto.insert(tk.END, f"Data: {ag[0]} | Horario: {ag[1]}\nPersonal: {ag[2]} | Status: {ag[3]}\n\n")
-
+    caixa_texto.config(state="disabled")
 
 # ==========================================================
 # CADASTRO DE FUNCIONARIO (PERSONAL) - so o Dono acessa
@@ -501,7 +565,10 @@ def abrir_cadastro_personal():
     janela.title("Cadastrar Funcionario")
     janela.geometry("350x580")
 
+
     tk.Label(janela, text="CADASTRO DE FUNCIONARIO (PERSONAL)", font=("Arial", 12, "bold")).pack(pady=10)
+
+    validacao = janela_principal.register(apenas_numeros)
 
     tk.Label(janela, text="Nome completo:").pack()
     entry_nome = tk.Entry(janela, width=35)
@@ -509,6 +576,7 @@ def abrir_cadastro_personal():
 
     tk.Label(janela, text="CPF (sera o login dele):").pack()
     entry_cpf = tk.Entry(janela, width=35)
+    entry_cpf.bind("<KeyRelease>", formatar_cpf)
     entry_cpf.pack()
 
     tk.Label(janela, text="Senha de acesso:").pack()
@@ -517,10 +585,12 @@ def abrir_cadastro_personal():
 
     tk.Label(janela, text="Data de nascimento (dd/mm/aaaa):").pack()
     entry_nasc = tk.Entry(janela, width=35)
+    entry_nasc.bind("<KeyRelease>", formatar_data)
     entry_nasc.pack()
 
     tk.Label(janela, text="Telefone:").pack()
-    entry_tel = tk.Entry(janela, width=35)
+    entry_tel = tk.Entry(janela, width=35,validate="key",
+    validatecommand=(validacao, "%P"))
     entry_tel.pack()
 
     tk.Label(janela, text="Email:").pack()
@@ -532,7 +602,8 @@ def abrir_cadastro_personal():
     entry_end.pack()
 
     tk.Label(janela, text="Numero do CREF:").pack()
-    entry_cref = tk.Entry(janela, width=35)
+    entry_cref = tk.Entry(janela, width=35,validate="key",
+    validatecommand=(validacao, "%P"))
     entry_cref.pack()
 
     tk.Label(janela, text="Especialidade:").pack()
@@ -577,6 +648,7 @@ def abrir_lista_personais():
 
     caixa_texto = tk.Text(janela, width=55, height=18)
     caixa_texto.pack(padx=10, pady=10)
+    caixa_texto.config(state="normal")
 
     conexao = conectar()
     cursor = conexao.cursor()
@@ -592,6 +664,7 @@ def abrir_lista_personais():
                 tk.END,
                 f"ID: {p[0]} | Nome: {p[1]}\nCPF: {p[2]} | Tel: {p[3]}\nEspecialidade: {p[4]}\n\n"
             )
+    caixa_texto.config(state="disabled")
 
 
 # ==========================================================
@@ -605,12 +678,15 @@ def abrir_cadastro_aluno():
 
     tk.Label(janela, text="CADASTRO DE ALUNO", font=("Arial", 12, "bold")).pack(pady=10)
 
+    validacao = janela_principal.register(apenas_numeros)
+
     tk.Label(janela, text="Nome completo:").pack()
     entry_nome = tk.Entry(janela, width=35)
     entry_nome.pack()
 
     tk.Label(janela, text="CPF (sera o login dele):").pack()
-    entry_cpf = tk.Entry(janela, width=35)
+    entry_cpf = tk.Entry(janela, width=35,)
+    entry_cpf.bind("<KeyRelease>", formatar_cpf)
     entry_cpf.pack()
 
     tk.Label(janela, text="Senha de acesso:").pack()
@@ -619,10 +695,12 @@ def abrir_cadastro_aluno():
 
     tk.Label(janela, text="Data de nascimento (dd/mm/aaaa):").pack()
     entry_nasc = tk.Entry(janela, width=35)
+    entry_nasc.bind("<KeyRelease>", formatar_data)
     entry_nasc.pack()
 
     tk.Label(janela, text="Telefone:").pack()
-    entry_tel = tk.Entry(janela, width=35)
+    entry_tel = tk.Entry(janela, width=35,validate="key",
+    validatecommand=(validacao, "%P"))
     entry_tel.pack()
 
     tk.Label(janela, text="Email:").pack()
@@ -642,7 +720,8 @@ def abrir_cadastro_aluno():
     entry_plano.pack()
 
     tk.Label(janela, text="Valor da mensalidade (ex: 150.00):").pack()
-    entry_valor = tk.Entry(janela, width=35)
+    entry_valor = tk.Entry(janela, width=35,validate="key",
+    validatecommand=(validacao, "%P"))
     entry_valor.pack()
 
     def salvar_aluno():
@@ -690,7 +769,7 @@ def abrir_lista_alunos():
 
     caixa_texto = tk.Text(janela, width=55, height=18)
     caixa_texto.pack(padx=10, pady=10)
-
+    caixa_texto.config(state="normal")
     conexao = conectar()
     cursor = conexao.cursor()
     cursor.execute("""
@@ -710,6 +789,7 @@ def abrir_lista_alunos():
                 tk.END,
                 f"ID: {a[0]} | Nome: {a[1]}\nCPF: {a[2]} | Plano: {a[3]}\nPersonal: {nome_personal}\n\n"
             )
+    caixa_texto.config(state="disabled")
 
 
 # ==========================================================
@@ -973,6 +1053,8 @@ def abrir_agendar_aula(personal_id_fixo):
 
     tk.Label(janela, text="Data da aula (dd/mm/aaaa):").pack(pady=(10, 0))
     entry_data = tk.Entry(janela, width=20)
+    entry_data.bind("<KeyRelease>", formatar_data)
+
     entry_data.pack()
 
     tk.Label(janela, text="Horario (hh:mm):").pack()
@@ -1026,6 +1108,7 @@ def abrir_ver_agendamentos(personal_id_fixo):
 
     caixa_texto = tk.Text(janela, width=58, height=18)
     caixa_texto.pack(padx=10, pady=10)
+    caixa_texto.config(state="normal")
 
     conexao = conectar()
     cursor = conexao.cursor()
@@ -1059,6 +1142,7 @@ def abrir_ver_agendamentos(personal_id_fixo):
                 tk.END,
                 f"ID: {ag[0]} | Aluno: {ag[1]}\nFuncionario: {ag[2]}\nData: {ag[3]} | Horario: {ag[4]} | Status: {ag[5]}\n\n"
             )
+    caixa_texto.config(state="disabled")
 
 
 # ==========================================================
@@ -1144,6 +1228,7 @@ def abrir_ver_pagamentos():
 
     caixa_texto = tk.Text(janela, width=58, height=18)
     caixa_texto.pack(padx=10, pady=10)
+    caixa_texto.config(state="normal")
 
     conexao = conectar()
     cursor = conexao.cursor()
@@ -1166,6 +1251,7 @@ def abrir_ver_pagamentos():
                 f"ID: {p[0]} | Aluno: {p[1]}\nValor: R$ {p[2]:.2f} | Mes: {p[3]}\n"
                 f"Vencimento: {p[4]} | Status: {p[5]}\n\n"
             )
+    caixa_texto.config(state="disabled")
 
 
 def abrir_marcar_pagamento():
